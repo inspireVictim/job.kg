@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Профиль — Корпоративный портал</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1 class="page-title">Личный профиль</h1>
+
+    <div id="alertBox"></div>
+
+    <div class="grid-2">
+      <section>
+        <div class="card">
+          <h3>Персональные данные</h3>
+          <form id="profileForm">
+            <div class="form-row"><label>ФИО</label><input id="pf_full_name" required></div>
+            <div class="form-row"><label>E-mail</label><input id="pf_email" type="email" required></div>
+            <div class="form-row"><label>Должность</label><input id="pf_position"></div>
+            <div class="form-row"><label>Отдел</label><input id="pf_department"></div>
+            <div class="form-row"><label>Телефон</label><input id="pf_phone"></div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Сохранить изменения</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3>Смена пароля</h3>
+          <form id="passwordForm">
+            <div class="form-row"><label>Текущий пароль</label><input id="oldPwd" type="password" minlength="6" required></div>
+            <div class="form-row"><label>Новый пароль</label><input id="newPwd" type="password" minlength="6" required></div>
+            <div class="form-row"><label>Повторите новый пароль</label><input id="newPwd2" type="password" minlength="6" required></div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Сменить пароль</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <aside>
+        <div class="profile-widget" id="profileWidget">
+          <div class="avatar">·</div>
+          <div class="full-name">Загрузка...</div>
+        </div>
+
+        <div class="card sidebar-card">
+          <h4>Учётная запись</h4>
+          <div><b>Логин:</b> <span id="info_username"></span></div>
+          <div><b>Роль:</b> <span id="info_role"></span></div>
+          <div><b>Создан:</b> <span id="info_created"></span></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script>
+    if (!Layout.guardOrRedirect()) throw new Error('not authenticated');
+    Layout.renderHeader('profile');
+
+    async function loadProfile() {
+      try {
+        const me = await Api.me();
+        Auth.setSession(Auth.getToken(), me);
+
+        document.getElementById('pf_full_name').value = me.full_name || '';
+        document.getElementById('pf_email').value = me.email || '';
+        document.getElementById('pf_position').value = me.position || '';
+        document.getElementById('pf_department').value = me.department || '';
+        document.getElementById('pf_phone').value = me.phone || '';
+
+        document.getElementById('info_username').textContent = me.username;
+        document.getElementById('info_role').textContent = Layout.ROLE_LABELS[me.role] || me.role;
+        document.getElementById('info_created').textContent = Layout.formatDateTime(me.created_at);
+
+        const widget = document.getElementById('profileWidget');
+        widget.innerHTML = `
+          <div class="avatar">${Layout.initials(me.full_name)}</div>
+          <div class="full-name">${Layout.escapeHtml(me.full_name)}</div>
+          <div class="position">${Layout.escapeHtml(me.position)}</div>
+          <div class="department">${Layout.escapeHtml(me.department)}</div>
+        `;
+      } catch (err) {
+        Layout.showAlert('alertBox', err.message, 'error');
+      }
+    }
+
+    document.getElementById('profileForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        full_name: document.getElementById('pf_full_name').value.trim(),
+        email: document.getElementById('pf_email').value.trim(),
+        position: document.getElementById('pf_position').value.trim(),
+        department: document.getElementById('pf_department').value.trim(),
+        phone: document.getElementById('pf_phone').value.trim() || null,
+      };
+      try {
+        const updated = await Api.updateMe(payload);
+        Auth.setSession(Auth.getToken(), updated);
+        Layout.showAlert('alertBox', 'Профиль успешно обновлён', 'success');
+        loadProfile();
+      } catch (err) {
+        Layout.showAlert('alertBox', err.message, 'error');
+      }
+    });
+
+    document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const oldP = document.getElementById('oldPwd').value;
+      const newP = document.getElementById('newPwd').value;
+      const newP2 = document.getElementById('newPwd2').value;
+      if (newP !== newP2) { Layout.showAlert('alertBox', 'Новые пароли не совпадают', 'error'); return; }
+      try {
+        await Api.changePassword({ old_password: oldP, new_password: newP });
+        Layout.showAlert('alertBox', 'Пароль успешно изменён', 'success');
+        document.getElementById('passwordForm').reset();
+      } catch (err) {
+        Layout.showAlert('alertBox', err.message, 'error');
+      }
+    });
+
+    loadProfile();
+  </script>
+</body>
+</html>

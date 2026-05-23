@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Сотрудники — Корпоративный портал</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1 class="page-title">Справочник сотрудников</h1>
+
+    <div id="alertBox"></div>
+
+    <div class="filters-bar">
+      <input type="text" id="searchInput" placeholder="Поиск по ФИО, логину, должности или e-mail...">
+      <select id="departmentFilter">
+        <option value="">Все отделы</option>
+      </select>
+      <button class="btn btn-secondary" id="resetBtn">Сбросить</button>
+
+      <button class="btn" id="addUserBtn" style="display:none; margin-left:auto;">+ Добавить сотрудника</button>
+    </div>
+
+    <div class="card" id="addUserCard" style="display:none;">
+      <h3>Регистрация нового сотрудника</h3>
+      <form id="addUserForm">
+        <div class="grid-2">
+          <div>
+            <div class="form-row"><label>ФИО</label><input id="nu_full_name" required></div>
+            <div class="form-row"><label>Логин</label><input id="nu_username" required></div>
+            <div class="form-row"><label>E-mail</label><input id="nu_email" type="email" required></div>
+            <div class="form-row"><label>Пароль</label><input id="nu_password" type="password" minlength="6" required></div>
+          </div>
+          <div>
+            <div class="form-row"><label>Должность</label><input id="nu_position"></div>
+            <div class="form-row"><label>Отдел</label><input id="nu_department"></div>
+            <div class="form-row"><label>Телефон</label><input id="nu_phone"></div>
+            <div class="form-row">
+              <label>Роль</label>
+              <select id="nu_role">
+                <option value="employee">Сотрудник</option>
+                <option value="hr">HR-менеджер</option>
+                <option value="admin">Администратор</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Создать аккаунт</button>
+          <button type="button" class="btn btn-secondary" id="cancelAddUser">Отмена</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="tableContainer"><div class="spinner"></div></div>
+  </main>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script>
+    if (!Layout.guardOrRedirect()) throw new Error('not authenticated');
+    Layout.renderHeader('employees');
+
+    const canCreate = Auth.hasRole('admin', 'hr');
+    if (canCreate) document.getElementById('addUserBtn').style.display = 'inline-block';
+
+    const searchInput = document.getElementById('searchInput');
+    const deptFilter = document.getElementById('departmentFilter');
+    let debounceId = null;
+
+    async function loadDepartments() {
+      try {
+        const depts = await Api.listDepartments();
+        deptFilter.innerHTML = '<option value="">Все отделы</option>' +
+          depts.map(d => `<option value="${Layout.escapeHtml(d)}">${Layout.escapeHtml(d)}</option>`).join('');
+      } catch (err) {
+        Layout.showAlert('alertBox', err.message, 'error');
+      }
+    }
+
+    async function loadUsers() {
+      const target = document.getElementById('tableContainer');
+      target.innerHTML = '<div class="spinner"></div>';
+      try {
+        const users = await Api.listUsers({
+          search: searchInput.value.trim() || undefined,
+          department: deptFilter.value || undefined,
+        });
+        if (!users.length) {
+          target.innerHTML = '<div class="empty-state">Сотрудники по заданным критериям не найдены</div>';
+          return;
+        }
+        target.innerHTML = `
+          <table class="employees-table">
+            <thead>
+              <tr>
+                <th>ФИО</th>
+                <th>Должность</th>
+                <th>Отдел</th>
+                <th>Телефон</th>
+                <th>E-mail</th>
+                <th>Роль</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${users.map(u => `
+                <tr>
+                  <td><b>${Layout.escapeHtml(u.full_name)}</b><br><span class="text-muted" style="font-size:0.8rem;">@${Layout.escapeHtml(u.username)}</span></td>
+                  <td>${Layout.escapeHtml(u.position)}</td>
+                  <td>${Layout.escapeHtml(u.department)}</td>
+                  <td>${Layout.escapeHtml(u.phone || '—')}</td>
+                  <td><a href="mailto:${Layout.escapeHtml(u.email)}">${Layout.escapeHtml(u.email)}</a></td>
+                  <td><span class="role-badge role-${u.role}">${Layout.ROLE_LABELS[u.role] || u.role}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (err) {
+        target.innerHTML = '';
+        Layout.showAlert('alertBox', err.message, 'error');
+      }
+    }
+
+    searchInput.addEventListener('input', () => {
+      clearTimeout(debounceId);
+      debounceId = setTimeout(loadUsers, 250);
+    });
+    deptFilter.addEventListener('change', loadUsers);
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      searchInput.value = '';
+      deptFilter.value = '';
+      loadUsers();
+    });
+
+    if (canCreate) {
+      const card = document.getElementById('addUserCard');
+      document.getElementById('addUserBtn').addEventListener('click', () => {
+        card.style.display = card.style.display === 'none' ? 'block' : 'none';
+      });
+      document.getElementById('cancelAddUser').addEventListener('click', () => {
+        card.style.display = 'none';
+      });
+      document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+          full_name: document.getElementById('nu_full_name').value.trim(),
+          username: document.getElementById('nu_username').value.trim(),
+          email: document.getElementById('nu_email').value.trim(),
+          password: document.getElementById('nu_password').value,
+          position: document.getElementById('nu_position').value.trim() || 'Сотрудник',
+          department: document.getElementById('nu_department').value.trim() || 'Общий отдел',
+          phone: document.getElementById('nu_phone').value.trim() || null,
+          role: document.getElementById('nu_role').value,
+        };
+        try {
+          await Api.register(payload);
+          Layout.showAlert('alertBox', `Сотрудник ${payload.full_name} успешно зарегистрирован`, 'success');
+          document.getElementById('addUserForm').reset();
+          card.style.display = 'none';
+          loadDepartments();
+          loadUsers();
+        } catch (err) {
+          Layout.showAlert('alertBox', err.message, 'error');
+        }
+      });
+    }
+
+    loadDepartments();
+    loadUsers();
+  </script>
+</body>
+</html>

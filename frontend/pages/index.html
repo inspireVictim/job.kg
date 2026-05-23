@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Главная — Корпоративный портал</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1 class="page-title">Лента корпоративных новостей</h1>
+
+    <div class="grid-2">
+      <section>
+        <div id="alertBox"></div>
+
+        <div class="card" id="newsFormCard" style="display:none;">
+          <h3>Опубликовать новость</h3>
+          <form id="newsForm">
+            <div class="form-row">
+              <label for="newsTitle">Заголовок</label>
+              <input type="text" id="newsTitle" maxlength="255" required>
+            </div>
+            <div class="form-row">
+              <label for="newsContent">Текст новости</label>
+              <textarea id="newsContent" required></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Опубликовать</button>
+              <button type="reset" class="btn btn-secondary">Очистить</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="newsList">
+          <div class="spinner"></div>
+        </div>
+      </section>
+
+      <aside>
+        <div class="profile-widget" id="profileWidget">
+          <div class="avatar">·</div>
+          <div class="full-name">Загрузка...</div>
+        </div>
+
+        <div class="card sidebar-card">
+          <h4>Полезные ссылки</h4>
+          <ul style="padding-left: 18px; margin: 0;">
+            <li><a href="/static/pages/employees.html">Справочник сотрудников</a></li>
+            <li><a href="/static/pages/documents.html">База регламентов и бланков</a></li>
+            <li><a href="/static/pages/profile.html">Редактирование профиля</a></li>
+          </ul>
+        </div>
+
+        <div class="card sidebar-card">
+          <h4>Сегодня</h4>
+          <p class="mb-0" id="todayDate"></p>
+          <p class="text-muted" style="font-size: 0.85rem;">Желаем продуктивного рабочего дня!</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script>
+    if (!Layout.guardOrRedirect()) throw new Error('not authenticated');
+    Layout.renderHeader('index');
+
+    const user = Auth.getUser();
+    const widget = document.getElementById('profileWidget');
+    widget.innerHTML = `
+      <div class="avatar">${Layout.initials(user.full_name)}</div>
+      <div class="full-name">${Layout.escapeHtml(user.full_name)}</div>
+      <div class="position">${Layout.escapeHtml(user.position)}</div>
+      <div class="department">${Layout.escapeHtml(user.department)}</div>
+    `;
+
+    document.getElementById('todayDate').textContent = new Date().toLocaleDateString('ru-RU', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    });
+
+    const canPublish = Auth.hasRole('admin', 'hr');
+    if (canPublish) {
+      document.getElementById('newsFormCard').style.display = 'block';
+    }
+
+    async function loadNews() {
+      const target = document.getElementById('newsList');
+      target.innerHTML = '<div class="spinner"></div>';
+      try {
+        const items = await Api.listNews();
+        if (!items.length) {
+          target.innerHTML = '<div class="empty-state">Новостей пока нет</div>';
+          return;
+        }
+        target.innerHTML = items.map(n => `
+          <article class="card">
+            <h3>${Layout.escapeHtml(n.title)}</h3>
+            <div class="meta">
+              Автор: <b>${Layout.escapeHtml(n.author_name || 'неизвестно')}</b> ·
+              ${Layout.formatDateTime(n.created_at)}
+              ${canPublish ? `<button class="btn btn-danger btn-sm" style="float:right;" data-del="${n.id}">Удалить</button>` : ''}
+            </div>
+            <div class="content">${Layout.escapeHtml(n.content)}</div>
+          </article>
+        `).join('');
+
+        if (canPublish) {
+          target.querySelectorAll('[data-del]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              if (!confirm('Удалить новость без возможности восстановления?')) return;
+              try {
+                await Api.deleteNews(btn.dataset.del);
+                loadNews();
+              } catch (err) {
+                Layout.showAlert('alertBox', err.message, 'error');
+              }
+            });
+          });
+        }
+      } catch (err) {
+        target.innerHTML = '';
+        Layout.showAlert('alertBox', err.message, 'error');
+      }
+    }
+
+    if (canPublish) {
+      document.getElementById('newsForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = document.getElementById('newsTitle').value.trim();
+        const content = document.getElementById('newsContent').value.trim();
+        if (title.length < 3) { Layout.showAlert('alertBox', 'Заголовок слишком короткий', 'error'); return; }
+        if (!content) { Layout.showAlert('alertBox', 'Текст новости обязателен', 'error'); return; }
+        try {
+          await Api.createNews({ title, content });
+          document.getElementById('newsForm').reset();
+          Layout.showAlert('alertBox', 'Новость успешно опубликована', 'success');
+          loadNews();
+        } catch (err) {
+          Layout.showAlert('alertBox', err.message, 'error');
+        }
+      });
+    }
+
+    loadNews();
+  </script>
+</body>
+</html>

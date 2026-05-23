@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Документы — Корпоративный портал</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1 class="page-title">База регламентов и бланков</h1>
+
+    <div id="alertBox"></div>
+
+    <div class="card" id="uploadCard" style="display:none;">
+      <h3>Загрузка нового документа</h3>
+      <form id="uploadForm" enctype="multipart/form-data">
+        <div class="form-row">
+          <label>Название документа</label>
+          <input type="text" id="docTitle" required maxlength="255">
+        </div>
+        <div class="form-row">
+          <label>Краткое описание</label>
+          <input type="text" id="docDescription" maxlength="512">
+          <span class="hint">Необязательное поле. Используется для пояснения назначения документа.</span>
+        </div>
+        <div class="form-row">
+          <label>Файл</label>
+          <input type="file" id="docFile" required>
+          <span class="hint">Максимальный размер файла — 20 МБ.</span>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn" id="uploadBtn">Загрузить документ</button>
+          <button type="reset" class="btn btn-secondary">Сбросить</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="docsContainer"><div class="spinner"></div></div>
+  </main>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script>
+    if (!Layout.guardOrRedirect()) throw new Error('not authenticated');
+    Layout.renderHeader('documents');
+
+    const canManage = Auth.hasRole('admin', 'hr');
+    if (canManage) document.getElementById('uploadCard').style.display = 'block';
+
+    async function loadDocuments() {
+      const target = document.getElementById('docsContainer');
+      target.innerHTML = '<div class="spinner"></div>';
+      try {
+        const items = await Api.listDocuments();
+        if (!items.length) {
+          target.innerHTML = '<div class="empty-state">База документов пока пуста</div>';
+          return;
+        }
+        target.innerHTML = `<div class="documents-list">${items.map(d => `
+          <div class="document-item">
+            <div class="doc-info">
+              <div class="title">${Layout.escapeHtml(d.title)}</div>
+              ${d.description ? `<div style="font-size:0.88rem; margin-top:4px;">${Layout.escapeHtml(d.description)}</div>` : ''}
+              <div class="meta">
+                Файл: <b>${Layout.escapeHtml(d.original_filename)}</b> ·
+                ${Layout.formatSize(d.size_bytes)} ·
+                загружен ${Layout.formatDateTime(d.uploaded_at)}
+                ${d.uploader_name ? ` (${Layout.escapeHtml(d.uploader_name)})` : ''}
+              </div>
+            </div>
+            <div class="actions">
+              <a class="btn" href="${Api.downloadDocumentUrl(d.id)}?t=${encodeURIComponent(Auth.getToken())}" target="_blank" rel="noopener" data-id="${d.id}">Скачать</a>
+              ${canManage ? `<button class="btn btn-danger btn-sm" data-del="${d.id}">Удалить</button>` : ''}
+            </div>
+          </div>
+        `).join('')}</div>`;
+
+        target.querySelectorAll('a[data-id]').forEach(link => {
+          link.addEventListener('click', async (e) => {
+            e.preventDefault();
+            try {
+              const res = await fetch(Api.downloadDocumentUrl(link.dataset.id), {
+                headers: { 'Authorization': `Bearer ${Auth.getToken()}` },
+              });
+              if (!res.ok) throw new Error('Не удалось скачать файл');
+              const blob = await res.blob();
+              const cd = res.headers.get('content-disposition') || '';
+              let filename = 'document';
+              const m = cd.match(/filename="?([^"]+)"?/);
+              if (m) filename = decodeURIComponent(m[1]);
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+            } catch (err) {
+              Layout.showAlert('alertBox', err.message, 'error');
+            }
+          });
+        });
+
+        if (canManage) {
+          target.querySelectorAll('[data-del]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              if (!confirm('Удалить документ без возможности восстановления?')) return;
+              try {
+                await Api.deleteDocument(btn.dataset.del);
+                loadDocuments();
+              } catch (err) {
+                Layout.showAlert('alertBox', err.message, 'error');
+              }
+            });
+          });
+        }
+      } catch (err) {
+        target.innerHTML = '';
+        Layout.showAlert('alertBox', err.message, 'error');
+      }
+    }
+
+    if (canManage) {
+      const form = document.getElementById('uploadForm');
+      const uploadBtn = document.getElementById('uploadBtn');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = document.getElementById('docTitle').value.trim();
+        const description = document.getElementById('docDescription').value.trim();
+        const fileInput = document.getElementById('docFile');
+        if (!fileInput.files.length) { Layout.showAlert('alertBox', 'Выберите файл для загрузки', 'error'); return; }
+
+        const fd = new FormData();
+        fd.append('title', title);
+        if (description) fd.append('description', description);
+        fd.append('file', fileInput.files[0]);
+
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Загрузка...';
+        try {
+          await Api.uploadDocument(fd);
+          Layout.showAlert('alertBox', 'Документ успешно загружен', 'success');
+          form.reset();
+          loadDocuments();
+        } catch (err) {
+          Layout.showAlert('alertBox', err.message, 'error');
+        } finally {
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = 'Загрузить документ';
+        }
+      });
+    }
+
+    loadDocuments();
+  </script>
+</body>
+</html>

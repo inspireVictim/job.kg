@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход в корпоративный портал</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <div class="login-wrapper">
+    <div class="login-card">
+      <div class="logo">
+        <div class="title">Корпоративный портал</div>
+        <div class="subtitle">Единое информационное пространство компании</div>
+      </div>
+
+      <div id="alertBox"></div>
+
+      <form id="loginForm" novalidate>
+        <div class="form-row">
+          <label for="username">Логин</label>
+          <input type="text" id="username" name="username" autocomplete="username" required>
+          <div class="error" id="err-username"></div>
+        </div>
+
+        <div class="form-row">
+          <label for="password">Пароль</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required>
+          <div class="error" id="err-password"></div>
+        </div>
+
+        <button type="submit" class="btn" style="width: 100%;" id="submitBtn">Войти в систему</button>
+      </form>
+
+      <div class="demo-hint">
+        <b>Демонстрационные учётные записи:</b><br>
+        Администратор — <code>admin / admin123</code><br>
+        HR-менеджер — <code>hr / hr123456</code><br>
+        Сотрудник — <code>ivanov / user1234</code>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/layout.js"></script>
+  <script>
+    if (Auth.isAuthenticated()) {
+      window.location.href = '/static/pages/index.html';
+    }
+
+    const form = document.getElementById('loginForm');
+    const submitBtn = document.getElementById('submitBtn');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      document.getElementById('err-username').textContent = '';
+      document.getElementById('err-password').textContent = '';
+      document.getElementById('alertBox').innerHTML = '';
+
+      const username = form.username.value.trim();
+      const password = form.password.value;
+
+      let hasErr = false;
+      if (username.length < 2) { document.getElementById('err-username').textContent = 'Логин должен содержать не менее 2 символов'; hasErr = true; }
+      if (password.length < 6) { document.getElementById('err-password').textContent = 'Пароль должен содержать не менее 6 символов'; hasErr = true; }
+      if (hasErr) return;
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Выполняется вход...';
+      try {
+        const data = await Api.login(username, password);
+        Auth.setSession(data.access_token, data.user);
+        window.location.href = '/static/pages/index.html';
+      } catch (err) {
+        Layout.showAlert('alertBox', err.message || 'Ошибка авторизации', 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Войти в систему';
+      }
+    });
+  </script>
+</body>
+</html>
